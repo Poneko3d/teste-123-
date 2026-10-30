@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';import {readFile,writeFile,unlink} from 'node:fs/promises';import {deserialize} from 'node:v8';import {pathToFileURL} from 'node:url';import Module from 'manifold-3d';import {Vector3} from 'three';import {rawTopology} from './src/continuous.js';import {growFaceGroup} from './src/face-groups.js';import {brushFaces} from './src/selection-repair.js';import {buildPickingTree,closestSurface} from './src/picking.js';
+const fixture=process.argv[2]??'../../work/aparecidinha-prepared.bin',meshes=deserialize(await readFile(fixture)),api=await Module();api.setup();
+let source=await readFile('src/worker.js','utf8');source=source.replace("import wasmUrl from 'manifold-3d/manifold.wasm?url';",`const wasmUrl=${JSON.stringify(import.meta.resolve('manifold-3d/manifold.wasm').replace('file:///',''))};`);const temp='src/.matrix-worker.mjs';await writeFile(temp,source);globalThis.onmessage=null;let result;globalThis.postMessage=r=>{if(!r.progress&&!r.brushChunk)result=r;};await import(pathToFileURL(process.cwd()+'/'+temp));let seq=0;async function ask(type,p={}){result=null;await globalThis.onmessage({data:{id:++seq,type,...p}});if(result?.error)throw Error(result.error);return result;}
+const failures=[],blocked=[];let successes=0;
+try{for(const [index,mesh] of meshes.entries()){if(process.argv.includes('--small')&&index===0)continue;
+ const solid=new api.Manifold(new api.Mesh(mesh)),volume=solid.volume(),box=solid.boundingBox(),span=Math.max(...box.max.map((v,i)=>v-box.min[i])),center=box.min.map((v,i)=>(v+box.max[i])/2);console.log('PART',index,mesh.triVerts.length/3,box);
+ await ask('loadMesh',{mesh});
+ const cfg={mode:'plane',cutStyle:'surface',axis:'Z',offset:center[2],u:center[0],v:center[1],width:Math.min(4,span*.08),thickness:Math.min(3,span*.06),depth:.8,clearance:.1,tipScale:.7,rotation:0,pinShape:'rectangle',pinSide:'first',connector:true};
+ try{const fit=await ask('fitPlanePin',{config:cfg}),r=await ask('cut',{config:{...cfg,...fit.connectorPosition}});for(const m of r.meshes){const s=new api.Manifold(new api.Mesh(m));assert.equal(s.status(),'NoError');assert.ok(s.volume()>0);s.delete();}console.log('PASS PIN',index);successes++;}catch(e){failures.push({index,mode:'pin',error:e.message});}
+ const t=rawTopology(mesh),tree=buildPickingTree(mesh.vertProperties,mesh.triVerts);let largest=0,area=0;
+ for(let i=0;i<t.faces.length;i++){const f=t.faces[i],a=new Vector3(...t.vertices[f[0]]),n=new Vector3(...t.vertices[f[1]]).sub(a).cross(new Vector3(...t.vertices[f[2]]).sub(a)).lengthSq();if(n>area){area=n;largest=i;}}
+ const target=new Vector3(center[0],box.min[1]-span,center[2]),hit=closestSurface(tree,target),regions=[['flat',growFaceGroup(t,largest,8)],['painted',brushFaces(t,hit.face,hit.point,span*.035)]];
+ for(const [region,faces] of regions)for(const connector of [false,true]){
+ const config={mode:'surface',cutStyle:'profile',patchDepth:.6,profileArea:70,depth:.6,clearance:.08,connector};
+ try{let boundary;try{boundary=await ask('faceContour',{faces,config});}catch(e){if(!connector)throw e;const raw=await ask('faceBoundary',{faces,config});const fitted=await ask('fitProfile',{paths:raw.paths,config:{...config,profileNormal:raw.profileNormal}});Object.assign(config,fitted.profileConfig);boundary={...raw,...fitted};}const r=await ask('cut',{paths:boundary.paths,config:{...config,profileNormal:boundary.profileNormal}});let sum=0;for(const m of r.meshes){const s=new api.Manifold(new api.Mesh(m));assert.equal(s.status(),'NoError');assert.ok(s.volume()>0);sum+=s.volume();s.delete();}if(!connector)assert.ok(Math.abs(sum-volume)<Math.max(.01,volume*1e-5));console.log('PASS PATCH',index,region,connector,'faces',faces.length);successes++;}catch(e){(connector&&/atravessa/.test(e.message)?blocked:failures).push({index,region,connector,faces:faces.length,error:e.message});console.log(connector&&/atravessa/.test(e.message)?'BLOCKED PATCH':'FAIL PATCH',index,region,connector,e.message);}
+ }
+ solid.delete();globalThis.gc?.();
+ }
+ console.log(JSON.stringify({successes,blocked,failures}));if(failures.length)process.exitCode=1;
+}finally{await unlink(temp);}

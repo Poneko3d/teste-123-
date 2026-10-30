@@ -1,0 +1,40 @@
+import {fitPlanePin} from './src/plane-pin.js';
+import assert from 'node:assert/strict';
+import Module from 'manifold-3d';
+import {editContour} from './src/contour-edit.js';
+import {fitPin,pinFits} from './src/pin-placement.js';
+import {connectParts,fitPartsConnector} from './src/post-connector.js';
+import {ObjectProject} from './src/project.js';
+import {encodeProject,decodeProject} from './src/project-file.js';
+import {rescaleProject} from './src/rescale.js';
+import {preserveGroups} from './src/preserve-groups.js';
+import {rawTopology} from './src/continuous.js';
+import {generateFaceGroups} from './src/face-groups.js';
+const pts=Array.from({length:5},(_,i)=>({point:[i,0,0]}));
+const joined=editContour(pts,false,{type:'join',from:4,to:0});assert.equal(joined.closed,true);assert.equal(joined.anchors.length,4);assert.equal(pts.length,5);
+assert.equal(editContour(joined.anchors,true,{type:'remove',index:1}).closed,true);
+assert.equal(editContour(pts,false,{type:'insert',edge:1,anchor:{point:[1.5,0,0]}}).anchors[2].point[0],1.5);
+assert.throws(()=>editContour(pts,false,{type:'join',from:0,to:2}),/bifurcação/);
+const c={width:10,thickness:8,depth:4,tipScale:.8,clearance:.15,pinShape:'rectangle',pinSide:'first',u:0,v:0};
+const area={polygon:[[-2,-2],[2,-2],[2,2],[-2,2]],center:[0,0]},fit=fitPin(area,c);assert.ok(fit.width<4);assert.ok(pinFits(area,{...c,...fit}));
+const api=await Module();api.setup();const a=api.Manifold.cube([20,20,10],true).translate([0,0,-5]),b=api.Manifold.cube([20,20,10],true).translate([0,0,5]);
+const frame={position:[0,0,0],normal:[0,0,1],u:[1,0,0],v:[0,1,0]};
+const shapes=['rectangle','cylinder','hexagon'];
+for(const pinShape of shapes){const cfg={...c,width:3,thickness:2,pinShape,mode:'connector'},meshes=connectParts(api,a,b,cfg,frame);for(const mesh of meshes){const m=new api.Manifold(new api.Mesh(mesh));assert.equal(m.status(),'NoError');const d=m.decompose();assert.equal(d.length,1);d.forEach(x=>x.delete());m.delete();}
+ const project=new ObjectProject();project.reset([a.getMesh(),b.getMesh()],'Pair');project.connect([1,2],meshes,{config:cfg,frame});const saved=decodeProject(encodeProject(project.state(),'Pair'));const scaled=rescaleProject(api,saved.state,1.5,{keepClearance:true});assert.equal(scaled.meshes.length,2);assert.equal(scaled.operations[0].recipe.config.clearance,.15);
+}
+const reversed=connectParts(api,a,b,{...c,width:3,thickness:2,pinSide:'second'},frame);
+const reversedBase=new api.Manifold(new api.Mesh(reversed[0])),reversedMate=new api.Manifold(new api.Mesh(reversed[1]));
+assert.ok(reversedBase.volume()<a.volume());assert.ok(reversedMate.volume()>b.volume());reversedBase.delete();reversedMate.delete();
+const hole=api.Manifold.cube([1,30,1],true).translate([0,0,2]),notched=b.subtract(hole);
+assert.throws(()=>connectParts(api,a,notched,{...c,width:3,thickness:2},frame),/parede externa/);hole.delete();notched.delete();
+const thin=api.Manifold.cube([4,4,10],true).translate([0,0,-5]),thinMate=api.Manifold.cube([4,4,10],true).translate([0,0,5]);const fitted=fitPartsConnector(api,thin,thinMate,c,frame);assert.ok(fitted.width<4);
+assert.throws(()=>connectParts(api,a,b,c,{...frame,position:[50,0,0]}));
+const groups=generateFaceGroups(rawTopology(a.getMesh()),15,'edges'),same=preserveGroups(a.getMesh(),groups,a.getMesh());assert.deepEqual(same.labels,groups.labels);
+const connected=connectParts(api,a,b,{...c,width:3,thickness:2},frame),kept=preserveGroups(a.getMesh(),groups,connected[0]);assert.equal(kept.labels.length,connected[0].triVerts.length/3);assert.ok(kept.count>groups.count);assert.ok([...kept.labels].every(x=>x>=0));
+const planeBox=api.Manifold.cube([4,5,6],true);
+for(const axis of ['X','Y','Z']){const placed=fitPlanePin(api,planeBox,{...c,axis,offset:0,rotation:0});assert.ok(placed.connectorPosition.width<6);assert.ok(placed.connectorPosition.depth>0);}
+const outer=api.Manifold.cylinder(10,10,10,48,true),inner=api.Manifold.cylinder(12,5,5,48,true),hollow=outer.subtract(inner);
+const hollowPin=fitPlanePin(api,hollow,{...c,axis:'Z',offset:0,rotation:0});assert.ok(Math.hypot(hollowPin.connectorPosition.u,hollowPin.connectorPosition.v)>5);
+[planeBox,outer,inner,hollow].forEach(x=>x.delete());
+[a,b,thin,thinMate].forEach(x=>x.delete());console.log('PASS contour edits, narrow-area fitting, three post-cut connector shapes, manifold results, project round trip, rescale and group persistence.');

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.sites-runtime/
+.openai/
+.*.mjs
+actual-*.test.mjs
+*.zip
+.env
+.env.local

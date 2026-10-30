@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {createDownloadGate} from './src/download-auth.js';
+let observer,fail=false,next={providerData:[{providerId:'google.com'}]},prompts=0,downloads=0,errors=0;
+const gate=createDownloadGate({observe:fn=>{observer=fn;fn(null);},signIn:async()=>{if(fail)throw Error('cancel');return next;},signOut:async()=>observer(null)},{prompt:()=>prompts++,error:()=>errors++});
+gate.request(()=>downloads++);assert.equal(downloads,0);assert.equal(prompts,1);
+gate.cancel();await gate.signIn();assert.equal(downloads,0,'cancelled request never downloads after login');
+gate.request(()=>downloads++);assert.equal(downloads,1,'Google session enables download');
+await gate.signOut();gate.request(()=>downloads++);assert.equal(downloads,1,'logout gates exports again');
+fail=true;await gate.signIn();assert.equal(downloads,1);assert.equal(errors,1);
+fail=false;next={providerData:[{providerId:'password'}]};await gate.signIn();assert.equal(downloads,1,'non-Google provider cannot unlock exports');
+next={providerData:[{providerId:'google.com'}]};await gate.signIn();assert.equal(downloads,2,'pending download resumes after Google login');
+console.log('Passed download gate: guest blocked, editing unaffected, cancellation, failed login, Google-only identity, logout and deferred download.');

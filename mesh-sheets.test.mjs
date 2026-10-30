@@ -1,0 +1,5 @@
+import assert from 'node:assert/strict';import Module from 'manifold-3d';import {removeCoincidentSheets} from './src/mesh-sheets.js';
+const api=await Module();api.setup();const source=api.Manifold.cube([10,10,10]),original=source.getMesh(),points=Array.from(original.vertProperties),ids=Array.from(original.triVerts),offset=points.length/3;
+const triangle=ids.slice(0,3);for(const id of triangle)points.push(...original.vertProperties.slice(id*3,id*3+3));ids.push(offset,offset+1,offset+2,offset+2,offset+1,offset);
+const input={numProp:3,vertProperties:Float32Array.from(points),triVerts:Uint32Array.from(ids)},before=input.triVerts.slice(),fixed=removeCoincidentSheets(input);
+assert.equal(fixed.removedFaces,2);assert.deepEqual(input.triVerts,before);assert.equal(fixed.mesh.vertProperties,input.vertProperties);const result=new api.Manifold(new api.Mesh(fixed.mesh));assert.equal(result.status(),'NoError');assert.equal(result.volume(),source.volume());assert.equal(removeCoincidentSheets(original).removedFaces,0);result.delete();source.delete();console.log('Passed: opposite coincident sheets removed, original coordinates and volume preserved, clean mesh unchanged.');

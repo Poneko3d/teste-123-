@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import Module from 'manifold-3d';
+import {ObjectProject} from './src/project.js';
+import {rescaleProject,replayCut,scaleMesh} from './src/rescale.js';
+import {encodeProject,decodeProject} from './src/project-file.js';
+const api=await Module();api.setup();
+const cube=api.Manifold.cube([40,40,40],true),project=new ObjectProject();
+const root=project.reset([cube.getMesh()],'Original');
+const recipe={config:{mode:'plane',cutStyle:'surface',axis:'Z',offset:0,u:0,v:0,width:8,thickness:6,depth:4,clearance:.2,tipScale:.7,pinShape:'rectangle',pinSide:'first',connector:true},frame:{position:[0,0,0],normal:[0,0,1],u:[1,0,0],v:[0,1,0]}};
+const kids=project.split(root.id,replayCut(api,cube,recipe),[0,0,1],10,recipe);
+function gap(items,z){
+ const rings=items.map(item=>{const s=new api.Manifold(new api.Mesh(item.mesh));try{const c=s.slice(z);try{return c.toPolygons();}finally{c.delete();}}finally{s.delete();}});
+ const pin=Math.max(...rings[0][0].map(p=>p[0])),hole=rings[1].find(r=>Math.max(...r.map(p=>p[0]))<15);
+ assert.ok(hole);return Math.max(...hole.map(p=>p[0]))-pin;
+}
+assert.ok(Math.abs(gap(project.items,1)-.2)<1e-5);
+const doubled=rescaleProject(api,project.state(),2,{keepClearance:true,scaleConnectors:true});project.commitScale(doubled);
+assert.ok(Math.abs(gap(project.items,2)-.2)<1e-5,'clearance stays .2 mm at 200%');
+assert.equal(project.operations[0].recipe.config.width,16);
+assert.equal(project.operations[0].recipe.config.depth,8);
+const scaled=rescaleProject(api,project.state(),.5,{keepClearance:false,scaleConnectors:true});
+assert.ok(Math.abs(gap(scaled.meshes,1)-.1)<1e-5,'plain scaling changes gap');
+const fixed=rescaleProject(api,project.state(),.75,{keepClearance:true,scaleConnectors:false});
+assert.equal(fixed.operations[0].recipe.config.width,16,'fixed pins retain current size');
+assert.ok(Math.abs(gap(fixed.meshes,1)-.2)<1e-5);
+project.items[0].name='Pino renomeado';project.items[1].hidden=true;
+const saved=encodeProject(project.state(),'Teste'),restored=decodeProject(saved),again=new ObjectProject();again.restore(restored.state);
+assert.equal(again.items[0].name,'Pino renomeado');assert.equal(again.items[1].hidden,true);
+assert.deepEqual(again.items[0].mesh.vertProperties,project.items[0].mesh.vertProperties);
+const repeat=rescaleProject(api,again.state(),.5,{keepClearance:true});
+assert.ok(Math.abs(gap(repeat.meshes,1)-.2)<1e-5,'loaded project rebuilds actual gap');
+const source=new api.Manifold(new api.Mesh(project.items[1].mesh));
+const second={config:{...recipe.config,axis:'X',offset:24,connector:false},frame:{normal:[1,0,0]}};
+project.split(project.items[1].id,replayCut(api,source,second),[1,0,0],6,second);source.delete();
+const recursive=rescaleProject(api,project.state(),.8,{keepClearance:true});assert.equal(recursive.meshes.length,3);
+for(const x of recursive.meshes){const solid=new api.Manifold(new api.Mesh(x.mesh));assert.equal(solid.status(),'NoError');assert.ok(solid.volume()>0);solid.delete();}
+const before=project.items;
+assert.throws(()=>rescaleProject(api,project.state(),.01,{keepClearance:true,scaleConnectors:false}),/pino|encaixe|parede/);
+assert.equal(project.items,before,'failed resize does not mutate project');
+assert.ok(project.undo());assert.equal(project.items.length,2);assert.ok(project.undo());assert.equal(project.scale,1);assert.equal(project.items.length,2);
+const plain=scaleMesh(root.mesh,1.23);assert.equal(plain.triVerts,root.mesh.triVerts,'no decimation');assert.equal(plain.vertProperties.length,root.mesh.vertProperties.length);
+const invalid={...restored.state,nextId:0};assert.throws(()=>decodeProject(encodeProject(invalid,'bad')),/Identificadores/);
+const faceRecipe={config:{mode:'surface',cutStyle:'profile',patchDepth:2,depth:4,profileArea:36,clearance:.2,connector:true},profile:{points:[[-10,-10,20],[10,-10,20],[10,10,20],[-10,10,20]],outward:[0,0,1]}};
+const patchProject=new ObjectProject(),patchRoot=patchProject.reset([cube.getMesh()],'Face');patchProject.split(patchRoot.id,replayCut(api,cube,faceRecipe),[0,0,1],5,faceRecipe);
+const fixedTip=rescaleProject(api,patchProject.state(),2,{keepClearance:true,scaleConnectors:false});assert.equal(fixedTip.operations[0].recipe.config.profileArea,9);assert.equal(fixedTip.operations[0].recipe.config.depth,4);assert.equal(fixedTip.operations[0].recipe.config.patchDepth,4);
+assert.throws(()=>rescaleProject(api,patchProject.state(),.5,{keepClearance:true,scaleConnectors:false}),/ponta/);
+cube.delete();console.log('Passed rescale: measured .2 mm gap at 200%, proportional gap, fixed pins, recursive cuts, atomic rejection, undo and editable project round-trip.');

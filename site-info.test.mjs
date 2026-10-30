@@ -1,0 +1,9 @@
+import assert from 'node:assert/strict';import {readFile,access} from 'node:fs/promises';
+const paths=['index.html','public/sobre.html','public/termos.html','public/privacidade.html','public/atualizacoes.html',...['sobre','termos','privacidade','atualizacoes'].map(x=>'public/en/'+x+'.html')];
+const canonicals=new Set();
+for(const path of paths){const html=await readFile(path,'utf8');const canonical=html.match(/rel="canonical" href="([^"]+)"/)[1];assert.ok(!canonicals.has(canonical));canonicals.add(canonical);assert.match(html,/<meta name="description" content="[^"]{35,}"/);assert.match(html,/<h1[ >]/);assert.ok(JSON.parse(html.match(/<script type="application\/ld\+json">([^<]+)<\/script>/)[1]));for(const [,href] of html.matchAll(/href="(\/[^"#?]+)"/g))await access((href.startsWith('/src/')?'': 'public/')+href.slice(1));}
+const robots=await readFile('public/robots.txt','utf8'),map=await readFile('public/sitemap.xml','utf8');assert.match(robots,/Sitemap: https:\/\/studio.poneko3d.com.br\/sitemap.xml/);for(const canonical of canonicals)assert.ok(map.includes('<loc>'+canonical+'</loc>'));
+const privacy=await readFile('public/privacidade.html','utf8');assert.match(privacy,/contato@poneko3d.com.br/);assert.match(privacy,/Google Fonts/);assert.match(privacy,/não envia seus modelos/);
+console.log('PASS information pages: unique canonicals, descriptions, headings, schema, local links, sitemap and privacy contact.');
+
+for(const path of paths.filter(x=>x!=='index.html')){const html=await readFile(path,'utf8');assert.doesNotMatch(html,/CatPin|Meshmixer|Split3MF/i);assert.match(html,/hreflang="en"/);assert.match(html,/data-lang="pt-BR"/);if(path.includes('/en/')){assert.match(html,/<html lang="en">/);assert.doesNotMatch(html,/href="\/(termos|privacidade|atualizacoes)\.html"(?! lang)/);}}

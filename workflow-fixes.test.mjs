@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import Module from 'manifold-3d';
+import {screenCut} from './src/screen-cut.js';
+import {projectedPins} from './src/projected-pins.js';
+import {selectionDiagnostics,brushFaces} from './src/selection-repair.js';
+import {rawTopology} from './src/continuous.js';
+import {faceGroupBoundary,generateFaceGroups} from './src/face-groups.js';
+import {prepareMesh} from './src/import-mesh.js';
+import {replayCut,scaleRecipe,scaleMesh} from './src/rescale.js';
+const api=await Module();api.setup();
+const a=api.Manifold.cube([12,12,40],true).translate([-12,0,0]),b=api.Manifold.cube([12,12,40],true).translate([12,0,0]),source=a.add(b);
+const spec={kind:'line',origin:[0,0,0],normal:[0,-1,0],u:[1,0,0],v:[0,0,1],distance:200,points:[[-60,0],[60,0]]};
+const cfg={mode:'projection',projection:spec,connector:true,width:10,thickness:8,depth:4,tipScale:.8,clearance:.15,pinShape:'rectangle',pinSide:'first',rotation:0};
+const cut=screenCut(api,source,spec),result=projectedPins(api,source,cut.parts,spec,cfg);
+assert.equal(result.plans.length,2);assert.ok(result.plans.every(p=>p.config.width<12));assert.ok(result.parts.every(p=>p.status()==='NoError'));
+const before=cut.parts[0].volume();assert.notEqual(result.parts[0].volume(),before);
+const intersection=result.parts[0].intersect(result.parts[1]);assert.ok(Math.abs(intersection.volume())<1e-6);intersection.delete();
+const recipe={config:{...cfg,projectionConnectors:result.plans}},scaled=api.Manifold.cube([24,24,80],true).translate([-24,0,0]).add(api.Manifold.cube([24,24,80],true).translate([24,0,0]));
+assert.equal(replayCut(api,scaled,scaleRecipe(recipe,2)).length,2);
+const wrong=structuredClone(result.plans);wrong[0].frame.position[0]=100;assert.throws(()=>projectedPins(api,source,cut.parts,spec,{...cfg,projectionConnectors:wrong}),/área/);
+result.parts.forEach(p=>p.delete());cut.parts.forEach(p=>p.delete());
+const sphere=api.Manifold.sphere(10,32),mesh=sphere.getMesh(),t=rawTopology(mesh),groups=generateFaceGroups(t,25,'orientation');
+const region=Array.from(groups.labels).flatMap((id,i)=>id===groups.labels[0]?[i]:[]);
+const brushed=brushFaces(t,0,t.vertices[t.faces[0][0]],2);assert.ok(brushed.includes(0));assert.ok(brushed.length<t.faces.length/2);
+// Complement gaps within an otherwise contiguous selected patch are diagnosed.
+const nearlyAll=t.faces.map((_,i)=>i).filter(i=>i!==0&&i!==Math.floor(t.faces.length/2));
+const diagnostic=selectionDiagnostics(t,nearlyAll,25);assert.ok(diagnostic.edges.length);assert.ok(diagnostic.addedFaces.length>=1);faceGroupBoundary(t,diagnostic.faces);
+const p=prepareMesh(api,mesh,{optimize:true,reductionPercent:30});assert.ok(p.optimization.outputTriangles<p.optimization.inputTriangles);assert.ok(Math.abs(p.optimization.reductionPercent-30)<10);p.solid.delete();
+const original=prepareMesh(api,mesh,{optimize:false,reductionPercent:90});assert.equal(original.optimization.inputTriangles,original.optimization.outputTriangles);original.solid.delete();
+if(process.argv.includes('--real')){const {readFile}=await import('node:fs/promises'),{deserialize}=await import('node:v8');const data=deserialize(await readFile('../../work/spider-prepared.bin'));const mesh=data.mesh??data.meshes?.[0]??data[0]??data;const real=new api.Manifold(new api.Mesh(mesh));const z=-55,s={...spec,origin:[0,0,z]},halves=screenCut(api,real,s),pins=projectedPins(api,real,halves.parts,s,cfg);assert.ok(pins.plans.length>=2);console.log('Spiderman connectors:',pins.plans.length,pins.plans.map(p=>p.config.width.toFixed(2)));pins.parts.forEach(p=>p.delete());halves.parts.forEach(p=>p.delete());real.delete();}
+[a,b,source,sphere,scaled].forEach(p=>p.delete());console.log('PASS projected multi-region connectors, bounds, replay, brush, boundary diagnosis, optional percentage reduction.');

@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {undoSpecific} from './src/selective-history.js';
+const mesh={vertProperties:new Float32Array([0,1,2])},item=(id,name)=>({id,name,mesh,offset:[0,0,0]});
+const snap=items=>({state:{items,roots:[{id:1,mesh},{id:2,mesh}],operations:[],nextId:3,scale:1},drafts:new Map(),fields:{width:4},connector:true,activeId:1,overview:false});
+const b=snap([item(1,'A'),item(2,'B')]),a=snap([{...b.state.items[0],name:'Renamed'},b.state.items[1]]),c=snap([{...a.state.items[0],hidden:true},{...a.state.items[1],name:'Later'}]);
+let r=undoSpecific(b,a,c);assert.equal(r.state.items[0].name,'A');assert.equal(r.state.items[0].hidden,true);assert.equal(r.state.items[1].name,'Later');assert.equal(r.state.items[0].mesh,mesh);
+assert.throws(()=>undoSpecific(b,a,snap([item(1,'Changed again'),item(2,'B')])));
+const cut={parent:1,children:[3,4]},other={parent:2,children:[5,6]};
+const after={...b,state:{...b.state,items:[item(3,'A.1'),item(4,'A.2'),item(2,'B')],operations:[cut],nextId:5}};
+const current={...after,state:{...after.state,items:[item(3,'A.1'),item(4,'A.2'),item(5,'B.1'),item(6,'B.2')],operations:[cut,other],nextId:7}};
+r=undoSpecific(b,after,current);assert.deepEqual(new Set(r.state.items.map(x=>x.id)),new Set([1,5,6]));assert.deepEqual(r.state.operations,[other]);assert.equal(r.state.nextId,7);
+const dependent={...current,state:{...current.state,items:[item(7,'A.1.1'),item(8,'A.1.2'),item(4,'A.2'),item(5,'B.1'),item(6,'B.2')],operations:[cut,other,{parent:3,children:[7,8]}],nextId:9}};
+assert.throws(()=>undoSpecific(b,after,dependent));assert.equal(dependent.state.items.length,5);
+console.log('PASS selective history: independent changes preserved, branch cut removed, dependencies rejected atomically, mesh buffers shared.');

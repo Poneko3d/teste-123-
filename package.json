@@ -1,0 +1,20 @@
+{
+  "name": "poneko-studio",
+  "version": "0.31.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader native --host 127.0.0.1",
+    "build": "node scripts/build-info.mjs && vite build --configLoader native",
+    "test": "node test.mjs && node surface.test.mjs && node continuous.test.mjs && node repair.test.mjs && node project.test.mjs && node controller.test.mjs && node formats.test.mjs && node pin-placement.test.mjs && node face-groups.test.mjs && node picking.test.mjs && node profile-connector.test.mjs && node i18n.test.mjs && node screen-cut.test.mjs && node display-geometry.test.mjs && node boundary-robustness.test.mjs && node mesh-sheets.test.mjs && node rescale.test.mjs && node download-auth.test.mjs && node editing.test.mjs && node export-assembly.test.mjs && node face-size.test.mjs && node piece-tools.test.mjs && node workflow-fixes.test.mjs && node finite-line.test.mjs && node contour-continuity.test.mjs && node path-speed.test.mjs && node site-info.test.mjs && node selective-history.test.mjs && node project-progress.test.mjs && node geometry-jobs.test.mjs && node three-mf-import.test.mjs && node boolean-artifacts.test.mjs && node topology-index.test.mjs && node trace-interaction.test.mjs && node geodesic-brush.test.mjs && node import-compatibility.test.mjs && node profile-input.test.mjs && node connected-partition.test.mjs"
+  },
+  "dependencies": {
+    "cdt2d": "1.0.0",
+    "fflate": "0.8.2",
+    "manifold-3d": "3.2.1",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "vite": "7.1.9"
+  }
+}

@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {createGeometryJobs} from './src/geometry-jobs.js';
+const workers=[],states=[];const jobs=createGeometryJobs(()=>{const w={sent:[],postMessage(m){this.sent.push(m);},terminate(){this.stopped=true;}};workers.push(w);return w;},s=>states.push(s));
+const reply=(w,data)=>w.onmessage({data:{id:w.sent.at(-1).id,...data}});
+const mesh={numProp:3,vertProperties:new Float32Array([0,0,0]),triVerts:new Uint32Array([0,0,0])};
+const load=jobs.request('loadMesh',{mesh});reply(workers[0],{mesh});await load;
+const cut=jobs.request('cut',{}),queued=jobs.request('contour',{});const cutRejected=assert.rejects(cut,{name:'AbortError'}),queuedRejected=assert.rejects(queued,{name:'AbortError'});
+reply(workers[0],{progress:'Calculando volume…'});assert.equal(states.at(-1).stage,'Calculando volume…');jobs.cancel();await Promise.all([cutRejected,queuedRejected]);assert.equal(workers[0].stopped,true);assert.equal(states.at(-1),null);
+const retry=jobs.request('contour',{});assert.equal(workers[1].sent[0].type,'loadMesh');assert.equal(workers[1].sent[0].mesh,mesh);reply(workers[0],{meshes:['stale']});assert.equal(jobs.active.type,'contour');reply(workers[1],{mesh});assert.equal(workers[1].sent[1].type,'contour');reply(workers[1],{cap:'valid'});assert.equal((await retry).cap,'valid');
+const again=jobs.request('cut',{});const rejectAgain=assert.rejects(again);jobs.cancel();await rejectAgain;const save=jobs.request('saveProject',{});assert.equal(workers[2].sent[0].type,'saveProject');reply(workers[2],{bytes:new Uint8Array()});await save;
+console.log('PASS cancellation: terminates busy worker, rejects queue, ignores stale results, restores source lazily and allows saving.');

@@ -1,0 +1,6 @@
+import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {deserialize} from 'node:v8';import {Vector3} from 'three';import {rawTopology,surfacePath} from './src/continuous.js';import {createPathFinder} from './src/path-finder.js';import {buildPickingTree,closestSurface} from './src/picking.js';
+const real=process.argv.includes('--real');const api=real?null:await (await import('manifold-3d')).default();api?.setup();const solid=api?.Manifold.sphere(30,48);const m=real?deserialize(await readFile('../../work/spider-prepared.bin'))[0]:solid.getMesh(),t=rawTopology(m),tree=buildPickingTree(m.vertProperties,m.triVerts),find=createPathFinder(t),a=closestSurface(tree,new Vector3(12,-35,42)),b=closestSurface(tree,new Vector3(10,-35,45.464101615));
+let started=performance.now();const old=surfacePath(t,a,b),global=performance.now()-started;started=performance.now();const local=find(a,b),first=performance.now()-started;started=performance.now();const hit=find(a,b),cached=performance.now()-started;
+assert.equal(hit,local);assert.deepEqual(local.points,old.points);assert.deepEqual(local.faces,old.faces);console.log(JSON.stringify({triangles:t.faces.length,globalMs:global,localMs:first,cachedMs:cached,pathPoints:local.points.length}));
+
+solid?.delete();

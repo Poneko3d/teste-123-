@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import Module from 'manifold-3d';
+import {cleanBooleanArtifacts} from './src/boolean-artifacts.js';
+const api=await Module();api.setup();
+const source=api.Manifold.cube([20,20,20]),main=api.Manifold.cube([10,10,10]);
+const tiny=api.Manifold.cube([.0001,.0001,.0001]).translate([30,30,30]);
+const result=api.Manifold.compose([main,tiny]);
+const cleaned=cleanBooleanArtifacts(api,result,source,1);
+assert.equal(cleaned.removed,1);
+assert.equal(cleaned.solid.volume(),main.volume());
+assert.deepEqual(cleaned.solid.getMesh().vertProperties,main.getMesh().vertProperties);
+const originalComponents=cleanBooleanArtifacts(api,result,source,2);
+assert.equal(originalComponents.solid,result);assert.equal(originalComponents.removed,0);
+const smallRealPart=api.Manifold.cube([.01,.01,.01]).translate([30,30,30]);
+const meaningful=api.Manifold.compose([main,smallRealPart]);
+assert.equal(cleanBooleanArtifacts(api,meaningful,source,1).removed,0);
+[source,main,tiny,result,cleaned.solid,smallRealPart,meaningful].forEach(p=>p.delete());
+console.log('PASS boolean residue bounds: exact retained vertices, original components and meaningful small parts preserved.');
